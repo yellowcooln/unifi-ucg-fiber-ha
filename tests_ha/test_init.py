@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from custom_components.unifi_gateway_rest.aiounifigw import Capabilities
+from custom_components.unifi_gateway_rest.aiounifigw import Capabilities, Device
 from custom_components.unifi_gateway_rest.const import DOMAIN
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -62,6 +62,51 @@ async def test_hub_and_subdevice_sensor_states(
     assert state_of("active_wan") == "WAN"
     # per-WAN sub-device sensor
     assert state_of("wan_availability") == "100.0"
+
+
+async def test_wan_failover_updates_existing_entities(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    payload = {
+        "type": "udm",
+        "name": "Example gateway",
+        "model": "UDMPRO",
+        "wan1": {"ifname": "eth9", "up": True, "is_uplink": True},
+        "wan3": {"ifname": "gre1", "up": True},
+    }
+    mock_client.get_device.return_value = Device.from_api(payload, active_wans=frozenset({"WAN"}))
+    await _setup(hass, config_entry, mock_client)
+    registry = er.async_get(hass)
+    keys = [
+        ("sensor", "active_wan"),
+        ("binary_sensor", "failover"),
+        ("binary_sensor", "wan_active"),
+        ("binary_sensor", "wan3_active"),
+    ]
+    entity_ids = {
+        key: registry.async_get_entity_id(platform, DOMAIN, f"{config_entry.unique_id}_{key}")
+        for platform, key in keys
+    }
+    assert all(entity_ids.values())
+    coordinator = config_entry.runtime_data.coordinator
+    for active, expected in [
+        ({"WAN3"}, ("WAN3", "on", "off", "on")),
+        ({"WAN"}, ("WAN", "off", "on", "off")),
+        (set(), ("unknown", "unknown", "off", "off")),
+    ]:
+        mock_client.get_device.return_value = Device.from_api(
+            payload, active_wans=frozenset(active)
+        )
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        for (platform, key), state in zip(keys, expected, strict=True):
+            entity_id = registry.async_get_entity_id(
+                platform, DOMAIN, f"{config_entry.unique_id}_{key}"
+            )
+            assert entity_id == entity_ids[key]
+            assert hass.states.get(entity_id).state == state
 
 
 async def test_binary_sensors(

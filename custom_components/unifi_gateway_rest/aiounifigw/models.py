@@ -7,7 +7,7 @@ documented in ``docs/API.md``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -287,10 +287,10 @@ class Device:
         return next((w for w in self.wans if w.is_active), None)
 
     @property
-    def failover_active(self) -> bool:
-        """True when the active uplink is not the primary (WAN1)."""
+    def failover_active(self) -> bool | None:
+        """True for a backup uplink; unknown when no active uplink is reported."""
         active = self.active_wan
-        return active is not None and active.id != "WAN"
+        return active.id != "WAN" if active is not None else None
 
     @property
     def persistent_storage(self) -> StorageVolume | None:
@@ -298,7 +298,8 @@ class Device:
         return next((s for s in self.storage if s.mount_point == "/persistent"), None)
 
     @classmethod
-    def from_api(cls, d: dict[str, Any]) -> Device:
+    def from_api(cls, d: dict[str, Any], *, active_wans: frozenset[str] | None = None) -> Device:
+        """Parse telemetry; None uses legacy flags, an explicit set overrides them."""
         sys_stats = d.get("sys_stats") or {}
         system_stats = d.get("system-stats") or {}
         uptime_stats = d.get("uptime_stats") or {}
@@ -310,7 +311,10 @@ class Device:
                 continue
             wan_id = "WAN" if i == 1 else f"WAN{i}"
             up = uptime_stats.get(wan_id)
-            wans.append(Wan.from_api(wan_id, wan_dict, up if isinstance(up, dict) else {}))
+            wan = Wan.from_api(wan_id, wan_dict, up if isinstance(up, dict) else {})
+            if active_wans is not None:
+                wan = replace(wan, is_active=wan_id in active_wans)
+            wans.append(wan)
 
         # Every physical SFP/SFP+ port is surfaced (the device has a fixed number
         # of them); an empty cage reports present=False. Module details (vendor /

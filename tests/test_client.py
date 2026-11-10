@@ -14,6 +14,9 @@ BASE = "https://gw.local"
 
 
 def _client(session: FakeSession, site: str = "default") -> GatewayClient:
+    session.add(
+        "GET", f"{BASE}/proxy/network/v2/api/site/{site}/wan/load-balancing/status", status=404
+    )
     return GatewayClient(session, "gw.local", ApiKeyAuth("k"), site=site, ssl=False)  # type: ignore[arg-type]
 
 

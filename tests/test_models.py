@@ -74,6 +74,32 @@ def test_device_failover_when_backup_active(stat_device: dict[str, Any]) -> None
     assert d.failover_active is True
 
 
+@pytest.mark.parametrize("legacy", [True, False, None])
+def test_explicit_wan_selection_preserves_metrics(legacy: bool | None) -> None:
+    payload = {
+        "wan1": {"is_uplink": True, "up": True},
+        "wan3": {
+            "is_uplink": legacy,
+            "up": True,
+            "ifname": "gre1",
+            "rx_bytes-r": 250,
+            "ip": "192.0.2.3",
+        },
+        "uptime_stats": {"WAN3": {"latency_average": 42, "availability": 99.0}},
+    }
+    device = Device.from_api(payload, active_wans=frozenset({"WAN3"}))
+    assert device.active_wan is device.wans[1]
+    assert device.active_wan is not None
+    assert device.failover_active is True
+    assert device.wans[0].is_active is False
+    assert device.active_wan.up is True
+    assert device.active_wan.rx_rate_bps == 250
+    assert device.active_wan.ip == "192.0.2.3"
+    assert device.active_wan.latency_ms == 42
+    assert device.active_wan.availability == 99.0
+    assert payload["wan1"]["is_uplink"] is True
+
+
 def test_device_sfp_both_ports(stat_device: dict[str, Any]) -> None:
     d = Device.from_api(_gateway(stat_device))
     # both physical SFP+ ports are surfaced; port 6 is empty, port 7 has a DAC.

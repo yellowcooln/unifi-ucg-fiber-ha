@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **UniFi 5G backup WAN selection.** Read Network's load-balancing status so a
+  WAN3 GRE backup without the legacy `is_uplink` flag is reported as active
+  during failover and returns to the wired WAN on recovery. Explicit status
+  overrides conflicting legacy flags; older gateways returning 404/405 retain
+  legacy detection. Failed or malformed status reads no longer imply healthy
+  primary service, and no selected WAN leaves failover unknown. Existing entity
+  IDs and per-WAN metrics are preserved.
+
 ## [0.2.5]
 
 ### Fixed

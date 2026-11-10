@@ -16,6 +16,7 @@ from .const import (
     PATH_STAT_HEALTH,
     PATH_STAT_SYSINFO,
     PATH_SYSTEM,
+    PATH_WAN_STATUS,
 )
 from .exceptions import GwApiError
 from .models import Device, Health, SysInfo, SystemIdentity
@@ -89,13 +90,48 @@ class GatewayClient:
         return SystemIdentity.from_api(await self._transport.get_json(PATH_SYSTEM))
 
     async def get_device(self) -> Device:
-        """The gateway device object from /stat/device."""
+        """Device telemetry with authoritative WAN selection when supported."""
         payload = await self._transport.get_json(PATH_STAT_DEVICE.format(site=self._site))
         devices = payload.get("data") if isinstance(payload, dict) else payload
         gateway = _find_gateway(devices if isinstance(devices, list) else [])
         if gateway is None:
             raise GwApiError("no gateway device found in /stat/device response")
-        return Device.from_api(gateway)
+        try:
+            status = await self._transport.get_json(PATH_WAN_STATUS.format(site=self._site))
+        except ValueError:
+            raise GwApiError("invalid WAN status: malformed JSON") from None
+        except GwApiError as err:
+            if err.status not in (404, 405):
+                raise
+            # Older Network versions do not expose this endpoint. Do not cache
+            # absence: a boot-time 404 or an upgrade can change it next poll.
+            return Device.from_api(gateway)
+        rows = status.get("wan_interfaces") if isinstance(status, dict) else None
+        if not isinstance(rows, list):
+            raise GwApiError("invalid WAN status: expected wan_interfaces list")
+        seen: set[str] = set()
+        active: set[str] = set()
+        wan_keys = {"WAN": "wan1", **{f"WAN{i}": f"wan{i}" for i in range(2, 7)}}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise GwApiError("invalid WAN status: expected interface object")
+            group, state = row.get("wan_networkgroup"), row.get("state")
+            if (
+                not isinstance(group, str)
+                or group not in wan_keys
+                or group in seen
+                or not isinstance(state, str)
+                or not state.strip()
+            ):
+                raise GwApiError("invalid WAN status: missing or ambiguous interface state")
+            seen.add(group)
+            if state == "ACTIVE":
+                if not isinstance(gateway.get(wan_keys[group]), dict):
+                    raise GwApiError(
+                        "invalid WAN status: active interface absent from /stat/device"
+                    )
+                active.add(group)
+        return Device.from_api(gateway, active_wans=frozenset(active))
 
     async def get_health(self) -> Health:
         """Subsystem health (WAN/ISP/www/vpn/lan/wlan) from /stat/health."""

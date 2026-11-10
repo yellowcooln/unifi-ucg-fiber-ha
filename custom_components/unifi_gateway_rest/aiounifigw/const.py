@@ -1,10 +1,11 @@
 """Constants: endpoint paths, defaults, header names.
 
-All telemetry is read from the *classic* UniFi Network application API
+Telemetry is read from the *classic* UniFi Network application API
 (``/proxy/network/api/s/<site>/stat/*``), which — unlike the newer API-key
 "Integration API" (``/integration/v1``) — exposes the full per-WAN, speedtest,
 temperature and SFP payload. The classic endpoint is reachable with *either* an
 API key (``X-API-Key``) or a local-account session (CSRF + ``TOKEN`` cookie).
+Active WAN selection additionally uses the Network v2 load-balancing status.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ PATH_SITES: Final = "/proxy/network/api/self/sites"
 PATH_STAT_DEVICE: Final = "/proxy/network/api/s/{site}/stat/device"
 PATH_STAT_HEALTH: Final = "/proxy/network/api/s/{site}/stat/health"
 PATH_STAT_SYSINFO: Final = "/proxy/network/api/s/{site}/stat/sysinfo"
+PATH_WAN_STATUS: Final = "/proxy/network/v2/api/site/{site}/wan/load-balancing/status"
 
 # Write / action endpoint (devmgr command channel). Payloads follow the
 # well-established UniFi controller convention; they are NOT triggered during

@@ -1,7 +1,8 @@
 # UniFi Network local REST API — endpoints used
 
-All telemetry is read from the **classic** UniFi Network application API under
-`/proxy/network/api/...`, reachable with either an `X-API-Key` header or a
+Telemetry is read from the **classic** UniFi Network application API under
+`/proxy/network/api/...`, with active WAN selection from the Network v2 endpoint
+documented below. Requests use either an `X-API-Key` header or a
 local-account session (CSRF + `TOKEN` cookie). The newer API-key **Integration
 API** (`/proxy/network/integration/v1/...`) is intentionally *not* used as a data
 source — it exposes only site/device summaries, not the WAN / speedtest /
@@ -69,8 +70,41 @@ Fields consumed from the gateway object:
 | `uptime_stats.WAN`/`WAN2` = `{availability, latency_average, uptime}` | per-WAN availability / latency / uptime |
 | `port_table[]` `sfp_found`, `sfp_vendor`, `sfp_part`, `sfp_rx_los`, `sfp_tx_fault` | SFP presence / health (optical DDM is **not** reported) |
 
-`wanN` maps to the `uptime_stats` key `WAN` (n=1) or `WAN{n}`. The active uplink
-is the `wanN` with `is_uplink == true`; failover is "active uplink is not WAN1".
+`wanN` maps to the `uptime_stats` key `WAN` (n=1) or `WAN{n}`. Link `up` is
+independent of active uplink selection: a ready backup can also be up. Legacy
+`is_uplink == true` is used only when the v2 status endpoint is unsupported.
+
+## `GET /proxy/network/v2/api/site/{site}/wan/load-balancing/status` — active WANs
+
+`get_device()` reads this alongside `/stat/device` on each poll. A UDM-Pro with
+UniFi 5G backup reports a `wan3` GRE interface without `is_uplink`; this endpoint
+provides the explicit selection instead:
+
+```json
+{"wan_interfaces": [
+  {"name": "Example wired", "state": "ACTIVE", "wan_networkgroup": "WAN"},
+  {"name": "Example 5G", "state": "BACKUP", "wan_networkgroup": "WAN3"}
+]}
+```
+
+The `wan_networkgroup` maps directly to the existing WAN IDs (`WAN`, `WAN2`
+through `WAN6`), never by display name or list order. `state == "ACTIVE"`
+overrides **all** legacy `is_uplink` flags, including conflicting primary flags.
+Other nonempty states are not active. Per-WAN metrics still come from
+`/stat/device` and `uptime_stats`; entity identities do not change.
+
+Only HTTP **404/405** falls back to the legacy flags, and the endpoint is retried
+on the next poll (absence is not cached). Authentication, permission, connection,
+server, redirect and non-JSON errors propagate rather than yielding healthy
+legacy data. Malformed successful payloads, duplicate groups, and an ACTIVE
+group missing from `/stat/device` raise `GwApiError`.
+
+An empty interface list or a valid list with no ACTIVE group clears legacy
+selection: the active-WAN sensor and WAN-failover sensor are unknown, not a
+healthy primary. With multiple ACTIVE groups, each per-WAN active flag is set;
+the aggregate active-WAN sensor retains its existing first-in-WAN-order
+semantics. Failover means that selected WAN is not `WAN`, and is unknown if
+none is selected.
 
 ## `GET /proxy/network/api/s/{site}/stat/health` — subsystem health
 
